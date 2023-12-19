@@ -1,25 +1,35 @@
 #include <Arduino.h>
+
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
 #include <PubSubClient.h>
 #include <ESPmDNS.h>
+#include <ADS1X15.h>
 
 #ifndef STASSID
-#define STASSID "Loki"
-#define STAPSK "0499619079"
-
-#define ADC_PIN 34
+#define STASSID "dlink_frankyd"
+#define STAPSK ""
 #endif
+
+ADS1115 ADS(0x48);
+
+float slope = 11.02;
+float intercept = 0.70;
+#define GRID_VOLTAGE 230
+#define END_OF_CYCLE 6000
+#define WASMACHINE_ID "wasmachine 1"
+
+unsigned long printPeriod = 1000; // in milliseconds
+// Track time in milliseconds since last reading
+unsigned long previousMillis = 0;
+unsigned long lastSample = 0;
+unsigned long EndOfCycle = 0;
 
 const char *ssid = STASSID;
 const char *password = STAPSK;
 
 WiFiClient espClient;
-IPAddress local_IP(192, 168, 0, 20);
-IPAddress gateway(192, 168, 0, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress DNS(8, 8, 8, 8);
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
@@ -34,103 +44,138 @@ void callback(char *topic, byte *payload, unsigned int length)
 
 PubSubClient client("mqtt.tago.io", 1883, callback, espClient);
 
-int mVperAmp = 77; // use 100 for 20A Module and 66 for 30A Module
-int watt = 0;
-double Voltage = 0;
-double VRMS = 0;
-double AmpsRMS = 0;
-float getVPP();
+float ADC_value = 0;
+float AmpsRMS = 0;
+int state = 0;
+double sum;
+double samples;
+
+int device_state;
+int prev_device_state;
+
 void connect_mqtt();
 void setup_wifi();
 
 void setup()
 {
   Serial.begin(9600);
+  Serial.println("Serial setup");
+  ADS.begin();
+  Serial.println("Setup ADC converter");
+  ADS.setGain(0);     // 6.144 volt
+  ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
+  ADS.setMode(0);     // continuous mode
+  ADS.readADC(0);     // first read to trigger
+  Serial.println("Setup WiFi and MQTT");
   setup_wifi();
   connect_mqtt();
 }
 
 void loop()
 {
-  // if MQTT is not connected, reconnect
-  if (!client.connected())
+  while (true)
   {
-    connect_mqtt();
-  }
-  client.loop();
-
-  Voltage = getVPP();
-  VRMS = (Voltage / 2.0) * 0.707;
-  AmpsRMS = ((VRMS * 1000) / mVperAmp) - 1.2; // This is the correction factor for the sensor
-  watt = (AmpsRMS * 240 / 1);
-  // note : 1.2 is my own empirically established calibration factor
-  // as the voltage measured at D34 depends on the length of the OUT-to-D34 wire
-
-  // allocate the memory for the document
-  StaticJsonDocument<200> JSONbuffer;
-  JsonArray array = JSONbuffer.to<JsonArray>();
-  JsonObject amperage = array.createNestedObject();
-  amperage["variable"] = "current";
-  amperage["unit"] = "A";
-  amperage["value"] = AmpsRMS;
-  JsonObject wattage = array.createNestedObject();
-  wattage["variable"] = "wattage";
-  wattage["unit"] = "W";
-  wattage["value"] = watt;
-  char JSONmessageBuffer[200];
-  serializeJson(JSONbuffer, JSONmessageBuffer);
-
-  if (client.publish("acl712", JSONmessageBuffer) == true)
-  {
-    Serial.println("Success sending message");
-  }
-  else
-  {
-    Serial.println("Error sending message");
-  }
-
-  Serial.println("-------------");
-
-  Serial.print(AmpsRMS);
-  Serial.print(" A RMS  ---  ");
-
-  Serial.print(watt);
-  Serial.println(" W");
-}
-
-float getVPP()
-{
-  float result;
-  int readValue;       // value read from the sensor
-  int maxValue = 0;    // store max value here
-  int minValue = 4096; // store min value here
-
-  readValue = analogRead(ADC_PIN);  //discard first reading
-  uint32_t start_time = millis();
-  while ((millis() - start_time) < 1000) // sample for 1 Sec. we get around 12000 samples per sec.
-  {
-    readValue = analogRead(ADC_PIN);
-    // see if you have a new maxValue
-    if (readValue > maxValue)
+    if (state == 0)
     {
-      /*record the maximum sensor value*/
-      maxValue = readValue;
+      state = 1;
     }
-    if (readValue < minValue)
+
+    if (state == 1)
     {
-      /*record the minimum sensor value*/
-      minValue = readValue;
+      state = 2;
+      previousMillis = millis();
+      sum = 0;
+      samples = 0;
+    }
+    if (state == 2)
+    {
+      uint32_t now = micros();
+      if (now - lastSample >= 1160) //  almost exact 860 SPS
+      {
+        lastSample = now;
+        ADC_value = ADS.getValue();
+        ADC_value = ADC_value - 13200;
+
+        sum = sum + (ADC_value * ADC_value);
+        samples++;
+      }
+      if ((millis() - previousMillis) >= printPeriod)
+      {                            // every printPeriod we do the calculation
+        previousMillis = millis(); //   update time
+        sum = sum / samples;
+        Serial.println(samples);
+        Serial.println(sum);
+        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept;
+        Serial.print("current: ");
+        Serial.print(AmpsRMS);
+        Serial.println(" amps RMS");
+        sum = 0;
+        samples = 0;
+        state = 3;
+      }
+    }
+    if (state == 3)
+    {
+      StaticJsonDocument<200> JSONbuffer;
+      JsonArray array = JSONbuffer.to<JsonArray>();
+      JsonObject amperage = array.createNestedObject();
+      amperage["variable"] = "current";
+      amperage["unit"] = "A";
+      amperage["value"] = AmpsRMS;
+      char JSONmessageBuffer[200];
+      serializeJson(JSONbuffer, JSONmessageBuffer);
+
+      if (client.publish("acs712", JSONmessageBuffer) == true)
+      {
+        Serial.println("Success sending message");
+      }
+      else
+      {
+        Serial.println("Error sending message");
+      }
+      Serial.print(device_state);
+      if (AmpsRMS >= 0.5 && device_state == 0)
+      {
+        device_state = 1;
+        StaticJsonDocument<200> JSONbuffer;
+        JsonArray array = JSONbuffer.to<JsonArray>();
+        JsonObject state = array.createNestedObject();
+        state["variable"] = "state";
+        state["value"] = "on";
+        char JSONmessageBuffer[200];
+        serializeJson(JSONbuffer, JSONmessageBuffer);
+        if (client.publish("acs712/state", JSONmessageBuffer) == true)
+        {
+          Serial.println("The cycle has started");
+        }
+      }
+
+      if (AmpsRMS < 0.5 && device_state == 1)
+      {
+        if ((millis() - EndOfCycle) >= END_OF_CYCLE)
+        {
+          device_state = 0;
+          StaticJsonDocument<200> JSONbuffer;
+          JsonArray array = JSONbuffer.to<JsonArray>();
+          JsonObject state = array.createNestedObject();
+          state["variable"] = "state";
+          state["value"] = "off";
+          char JSONmessageBuffer[200];
+          serializeJson(JSONbuffer, JSONmessageBuffer);
+          if (client.publish("acs712/state", JSONmessageBuffer) == true)
+          {
+            Serial.println("The cycle has ended");
+          }
+          EndOfCycle = millis();
+        }
+        else
+        {
+          EndOfCycle = millis();
+        }
+      }
+      state = 0;
     }
   }
-
-  // Subtract min from max
-  result = ((maxValue - minValue) * 3.3) / 4096.0;
-  Serial.print("measured values: ");
-  Serial.println(maxValue);
-  Serial.println(minValue);
-  Serial.println(result);
-
-  return result;
 }
 
 void connect_mqtt()
@@ -141,7 +186,8 @@ void connect_mqtt()
   //    serverIp = MDNS.queryHost("mqtt.tago.io");
   //}
   Serial.print("connecting...");
-  while (!client.connect("espheating", "Token", "84510911-1ec0-43fc-934c-45638df09402", "acl712/status", 1, 1, "offline"))
+  while (!client.connect("espcurrent", "Token", "3ced64a7-20ec-44af-88de-058729507baf", "acl712/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
+    ;
   {
     Serial.print(".");
     delay(1000);
@@ -150,10 +196,10 @@ void connect_mqtt()
 
 void setup_wifi()
 {
-  if (!WiFi.config(local_IP, gateway, subnet, DNS))
-  {
-    Serial.println("STA Failed to configure");
-  }
+  // if (!WiFi.config(local_IP, gateway, subnet, DNS))
+  //{
+  //   Serial.println("STA Failed to configure");
+  // }
   delay(10);
   Serial.println();
   Serial.print("Connecting to ");
