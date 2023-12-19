@@ -6,6 +6,7 @@
 #include <PubSubClient.h>
 #include <ESPmDNS.h>
 #include <ADS1X15.h>
+#include <LiquidCrystal_I2C.h>
 
 #ifndef STASSID
 #define STASSID "dlink_frankyd"
@@ -13,9 +14,10 @@
 #endif
 
 ADS1115 ADS(0x48);
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
-float slope = 11.02;
-float intercept = 0.70;
+float slope = 11;
+float intercept = 0.23;
 #define GRID_VOLTAGE 230
 #define END_OF_CYCLE 6000
 #define WASMACHINE_ID "wasmachine 1"
@@ -66,6 +68,12 @@ void setup()
   ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger
+
+  lcd.init();
+  // Turn on the backlight on LCD.
+  lcd.backlight();
+  lcd.print("Team1 meter");
+
   Serial.println("Setup WiFi and MQTT");
   setup_wifi();
   connect_mqtt();
@@ -109,6 +117,10 @@ void loop()
         Serial.print("current: ");
         Serial.print(AmpsRMS);
         Serial.println(" amps RMS");
+        lcd.setCursor(0, 0);
+        lcd.print("current = ");
+        lcd.print(AmpsRMS);
+        lcd.print(" A");
         sum = 0;
         samples = 0;
         state = 3;
