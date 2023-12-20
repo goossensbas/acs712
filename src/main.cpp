@@ -17,7 +17,7 @@ ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
 float slope = 11;
-float intercept = 0.23;
+float intercept = 0.33;
 #define GRID_VOLTAGE 230
 #define END_OF_CYCLE 6000
 #define WASMACHINE_ID "wasmachine 1"
@@ -102,7 +102,7 @@ void loop()
       {
         lastSample = now;
         ADC_value = ADS.getValue();
-        ADC_value = ADC_value - 13200;
+        ADC_value = ADC_value - 12690;
 
         sum = sum + (ADC_value * ADC_value);
         samples++;
