@@ -11,16 +11,17 @@
 #ifndef STASSID
 #define STASSID "dlink_frankyd"
 #define STAPSK ""
+// TagoIO device token
+#define TAGO_TOKEN "3ced64a7-20ec-44af-88de-058729507baf"
 #endif
 
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
-
+// slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 11;
 float intercept = 0.33;
-#define GRID_VOLTAGE 230
+
 #define END_OF_CYCLE 6000
-#define WASMACHINE_ID "wasmachine 1"
 
 unsigned long printPeriod = 1000; // in milliseconds
 // Track time in milliseconds since last reading
@@ -33,6 +34,7 @@ const char *password = STAPSK;
 
 WiFiClient espClient;
 
+// callback function for mqtt. Obligatory for PubSubclient.
 void callback(char *topic, byte *payload, unsigned int length)
 {
   // do something with the message
@@ -67,11 +69,11 @@ void setup()
   ADS.setGain(0);     // 6.144 volt
   ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
   ADS.setMode(0);     // continuous mode
-  ADS.readADC(0);     // first read to trigger
+  ADS.readADC(0);     // first read to trigger ADC
 
   lcd.init();
-  // Turn on the backlight on LCD.
-  lcd.backlight();
+
+  lcd.backlight(); // Turn on the backlight on LCD.
   lcd.print("Team1 meter");
 
   Serial.println("Setup WiFi and MQTT");
@@ -87,7 +89,7 @@ void loop()
     {
       state = 1;
     }
-
+    // state 1: reset sum and sample to 0 and go to state 2
     if (state == 1)
     {
       state = 2;
@@ -95,6 +97,9 @@ void loop()
       sum = 0;
       samples = 0;
     }
+    // state 2: every 1160µs, we ask the ADC converter for a value.
+    // Then we substract the DC offset to get the AC value.
+    // Add every measurement to sum.
     if (state == 2)
     {
       uint32_t now = micros();
@@ -110,10 +115,10 @@ void loop()
       if ((millis() - previousMillis) >= printPeriod)
       {                            // every printPeriod we do the calculation
         previousMillis = millis(); //   update time
-        sum = sum / samples;
+        sum = sum / samples;       // get the average current measured
         Serial.println(samples);
         Serial.println(sum);
-        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept;
+        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept; // calculate the RMS value
         Serial.print("current: ");
         Serial.print(AmpsRMS);
         Serial.println(" amps RMS");
@@ -126,8 +131,11 @@ void loop()
         state = 3;
       }
     }
+
+    // state 3: send the values to MQTT broker
     if (state == 3)
     {
+      // make a json object
       StaticJsonDocument<200> JSONbuffer;
       JsonArray array = JSONbuffer.to<JsonArray>();
       JsonObject amperage = array.createNestedObject();
@@ -136,7 +144,7 @@ void loop()
       amperage["value"] = AmpsRMS;
       char JSONmessageBuffer[200];
       serializeJson(JSONbuffer, JSONmessageBuffer);
-
+      // publish the serialised buffer to the broker
       if (client.publish("acs712", JSONmessageBuffer) == true)
       {
         Serial.println("Success sending message");
@@ -146,6 +154,8 @@ void loop()
         Serial.println("Error sending message");
       }
       Serial.print(device_state);
+      // IF the device is OFF and the current is more than 0,5A
+      // THEN update the device state to ON, and publish the state on the broker
       if (AmpsRMS >= 0.5 && device_state == 0)
       {
         device_state = 1;
@@ -161,7 +171,8 @@ void loop()
           Serial.println("The cycle has started");
         }
       }
-
+      // IF the device is ON and the current is less than 0,5A for END_OF_CYCLE ms
+      // THEN update the device state to OFF, and publish the state on the broker
       if (AmpsRMS < 0.5 && device_state == 1)
       {
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
@@ -192,13 +203,9 @@ void loop()
 
 void connect_mqtt()
 {
-  //  while (serverIp.toString() == "0.0.0.0") {
-  //    Serial.println("Resolving host mqtt.tago.io");
-  //    delay(250);
-  //    serverIp = MDNS.queryHost("mqtt.tago.io");
-  //}
+  // connect to tagoIO broker with token auth and set the LWT
   Serial.print("connecting...");
-  while (!client.connect("espcurrent", "Token", "3ced64a7-20ec-44af-88de-058729507baf", "acl712/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
+  while (!client.connect("espcurrent", "Token", TAGO_TOKEN, "acl712/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
     ;
   {
     Serial.print(".");
@@ -208,10 +215,8 @@ void connect_mqtt()
 
 void setup_wifi()
 {
-  // if (!WiFi.config(local_IP, gateway, subnet, DNS))
-  //{
-  //   Serial.println("STA Failed to configure");
-  // }
+  // connect to wifi with ssid and password
+  // start the DNS client to look up the IP address of the broker
   delay(10);
   Serial.println();
   Serial.print("Connecting to ");
