@@ -54,6 +54,8 @@ int state = 0;
 double sum;
 double samples;
 
+float ADC_vdd = 0;
+
 int device_state;
 int prev_device_state;
 
@@ -62,7 +64,7 @@ void setup_wifi();
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Serial setup");
   ADS.begin();
   Serial.println("Setup ADC converter");
@@ -75,7 +77,23 @@ void setup()
 
   lcd.backlight(); // Turn on the backlight on LCD.
   lcd.print("Team1 meter");
+  // Show welcome message. Meanwhile wait for vdd to stabilise
+  delay(2000);
+  lcd.clear();
+  lcd.print("calibrating...");
 
+  // Measure Vdd. take the average of 1000 samples.
+  for (int i = 0; i < 1000; i++)
+  {
+    // wait for conversion to finish. (conversion takes 1160µs)
+    delay(2);
+    ADC_vdd = ADC_vdd + ADS.readADC(1);
+  }
+  ADC_vdd = ADC_vdd / 1000;
+  lcd.print("Vdd = ");
+  lcd.print(ADC_vdd);
+  lcd.print(" V");
+  delay(1500);
   Serial.println("Setup WiFi and MQTT");
   setup_wifi();
   connect_mqtt();
@@ -107,7 +125,7 @@ void loop()
       {
         lastSample = now;
         ADC_value = ADS.getValue();
-        ADC_value = ADC_value - 12690;
+        ADC_value = ADC_value - (ADC_vdd / 2);
 
         sum = sum + (ADC_value * ADC_value);
         samples++;
