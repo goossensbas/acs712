@@ -9,8 +9,8 @@
 #include <LiquidCrystal_I2C.h>
 
 #ifndef STASSID
-#define STASSID "dlink_frankyd"
-#define STAPSK ""
+#define STASSID "AP_BAS_go"
+#define STAPSK "0499619079"
 // TagoIO device token
 #define TAGO_TOKEN "3ced64a7-20ec-44af-88de-058729507baf"
 #endif
@@ -18,8 +18,8 @@
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
-float slope = 11;
-float intercept = 0.33;
+float slope = 10;
+float intercept = 0.09;
 
 #define END_OF_CYCLE 6000
 
@@ -90,13 +90,23 @@ void setup()
     ADC_vdd = ADC_vdd + ADS.readADC(1);
   }
   ADC_vdd = ADC_vdd / 1000;
+  lcd.clear();
   lcd.print("Vdd = ");
-  lcd.print(ADC_vdd);
+  lcd.print((ADC_vdd * 0.0001875));
   lcd.print(" V");
   delay(1500);
+  lcd.setCursor(0, 1);
+  lcd.print("connecting to wifi");
   Serial.println("Setup WiFi and MQTT");
   setup_wifi();
   connect_mqtt();
+
+  // reset ADC values for measuring current
+  ADS.reset();
+  ADS.setGain(0);     // 6.144 volt
+  ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
+  ADS.setMode(0);     // continuous mode
+  ADS.readADC(0);     // first read to trigger ADC
 }
 
 void loop()
@@ -126,7 +136,6 @@ void loop()
         lastSample = now;
         ADC_value = ADS.getValue();
         ADC_value = ADC_value - (ADC_vdd / 2);
-
         sum = sum + (ADC_value * ADC_value);
         samples++;
       }
@@ -136,14 +145,18 @@ void loop()
         sum = sum / samples;       // get the average current measured
         Serial.println(samples);
         Serial.println(sum);
-        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept; // calculate the RMS value
         Serial.print("current: ");
         Serial.print(AmpsRMS);
         Serial.println(" amps RMS");
+        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept; // calculate the RMS value
+        if (AmpsRMS < 0)
+        {
+          AmpsRMS = 0;
+        }
         lcd.setCursor(0, 0);
-        lcd.print("current = ");
+        lcd.print("current= ");
         lcd.print(AmpsRMS);
-        lcd.print(" A");
+        lcd.print("A");
         sum = 0;
         samples = 0;
         state = 3;
@@ -239,6 +252,11 @@ void setup_wifi()
   Serial.println();
   Serial.print("Connecting to ");
   Serial.println(ssid);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("connecting to ");
+  lcd.setCursor(0, 1);
+  lcd.print(ssid);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
@@ -246,6 +264,10 @@ void setup_wifi()
   while (WiFi.waitForConnectResult() != WL_CONNECTED)
   {
     Serial.println("Connection Failed! Rebooting...");
+    lcd.setCursor(0, 0);
+    lcd.print("connection failed!");
+    lcd.setCursor(0, 1);
+    lcd.print("Rebooting...");
     delay(5000);
     ESP.restart();
   }
