@@ -136,19 +136,21 @@ void loop()
         lastSample = now;
         ADC_value = ADS.getValue();
         ADC_value = ADC_value - (ADC_vdd / 2);
-        sum = sum + (ADC_value * ADC_value);
+        sum = sum + (ADC_value * ADC_value); // square value
         samples++;
       }
       if ((millis() - previousMillis) >= printPeriod)
       {                            // every printPeriod we do the calculation
         previousMillis = millis(); //   update time
         sum = sum / samples;       // get the average current measured
-        Serial.println(samples);
-        Serial.println(sum);
+        // Serial.println(samples);
+        // Serial.println(sum);
         Serial.print("current: ");
         Serial.print(AmpsRMS);
         Serial.println(" amps RMS");
-        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept; // calculate the RMS value
+        // calculate the RMS value. square root sum, multiply by voltage per value and multiply by slope (mV/A).
+        // intercept is the zero adjustment.
+        AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept;
         if (AmpsRMS < 0)
         {
           AmpsRMS = 0;
@@ -234,7 +236,7 @@ void loop()
 
 void connect_mqtt()
 {
-  // connect to tagoIO broker with token auth and set the LWT
+  // connect to tagoIO broker with token auth and set the LWT message
   Serial.print("connecting...");
   while (!client.connect("espcurrent", "Token", TAGO_TOKEN, "acl712/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
     ;
