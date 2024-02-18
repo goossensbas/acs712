@@ -1,5 +1,6 @@
 #include <Arduino.h>
-
+#include <FS.h>
+#include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
@@ -21,9 +22,11 @@ LiquidCrystal_I2C lcd(0x3F, 16, 2);
 float slope = 10;
 float intercept = 0.09;
 
-#define END_OF_CYCLE 6000
+#define END_OF_CYCLE 10000
 
 unsigned long printPeriod = 1000; // in milliseconds
+unsigned long previous_calibration = 0;
+unsigned long calibration_time = 60000; //period for recalibrating vdd in ms.
 // Track time in milliseconds since last reading
 unsigned long previousMillis = 0;
 unsigned long lastSample = 0;
@@ -53,14 +56,23 @@ float AmpsRMS = 0;
 int state = 0;
 double sum;
 double samples;
+uint32_t session_id = 0;
+uint32_t hours_operated = 0;
 
 float ADC_vdd = 0;
 
 int device_state;
 int prev_device_state;
 
+//SPIFFS function definitions
+uint32_t readNumberFile(fs::FS &fs, const char * path);
+const char* counterfilename = "/counter.txt";
+const char* sessionfilename = "/session_id.txt";
+
+
 void connect_mqtt();
 void setup_wifi();
+float measure_vdd(void);
 
 void setup()
 {
@@ -73,23 +85,56 @@ void setup()
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger ADC
 
-  lcd.init();
+  lcd.init();         //init the LCD
+  lcd.backlight();    // Turn on the backlight on LCD.
 
-  lcd.backlight(); // Turn on the backlight on LCD.
-  lcd.print("Team1 meter");
-  // Show welcome message. Meanwhile wait for vdd to stabilise
+//start the filesystem. If there is an error, loop infinitely.
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An error occurred while mounting SPIFFS");
+    lcd.print("Filesystem error!");
+    while(true);
+  }
+  // Check if the counter file exists.
+  // IF the file exists, read the contents into the variable 
+  if (!SPIFFS.exists(counterfilename)) {
+    Serial.println("Counter File does not exist. Creating...");
+    File file = SPIFFS.open(counterfilename, "w");
+    if (!file) {
+      Serial.println("Failed to create file");
+      lcd.print("error counterfile");
+      while(true);
+    }
+    file.println(hours_operated);
+    file.close();
+  }
+  else{
+    hours_operated = readNumberFile(SPIFFS, counterfilename);
+  }
+  // Check if the session ID file exists.
+  // IF the file exists, read the contents into the variable 
+  if (!SPIFFS.exists(sessionfilename)) {
+    Serial.println("Session File does not exist. Creating...");
+    File file = SPIFFS.open(sessionfilename, "w");
+    if (!file) {
+      Serial.println("Failed to create file");
+      lcd.print("error sessionfile");
+      while(true);
+    }
+    file.println(session_id);
+    file.close();
+  }
+  else{
+    session_id = readNumberFile(SPIFFS, sessionfilename);
+  }
+  lcd.print("EcoWashMate");
+// Show welcome message. Meanwhile wait for vdd to stabilise
   delay(2000);
   lcd.clear();
   lcd.print("calibrating...");
 
-  // Measure Vdd. take the average of 1000 samples.
-  for (int i = 0; i < 1000; i++)
-  {
-    // wait for conversion to finish. (conversion takes 1160µs)
-    delay(2);
-    ADC_vdd = ADC_vdd + ADS.readADC(1);
-  }
-  ADC_vdd = ADC_vdd / 1000;
+//function to measure vdd
+  ADC_vdd = measure_vdd();
+
   lcd.clear();
   lcd.print("Vdd = ");
   lcd.print((ADC_vdd * 0.0001875));
@@ -168,24 +213,7 @@ void loop()
     // state 3: send the values to MQTT broker
     if (state == 3)
     {
-      // make a json object
-      StaticJsonDocument<200> JSONbuffer;
-      JsonArray array = JSONbuffer.to<JsonArray>();
-      JsonObject amperage = array.createNestedObject();
-      amperage["variable"] = "current";
-      amperage["unit"] = "A";
-      amperage["value"] = AmpsRMS;
-      char JSONmessageBuffer[200];
-      serializeJson(JSONbuffer, JSONmessageBuffer);
-      // publish the serialised buffer to the broker
-      if (client.publish("acs712", JSONmessageBuffer) == true)
-      {
-        Serial.println("Success sending message");
-      }
-      else
-      {
-        Serial.println("Error sending message");
-      }
+      
       Serial.print(device_state);
       // IF the device is OFF and the current is more than 0,5A
       // THEN update the device state to ON, and publish the state on the broker
@@ -204,9 +232,38 @@ void loop()
           Serial.println("The cycle has started");
         }
       }
+
+      //IF the device state has changed from OFF to ON, add 1 to session ID
+      if (device_state == 1)
+      {
+        session_id = session_id + 1;
+        device_state = 2;
+      }
+
+      //Only send sensor data if the machine is ON
+      if (device_state == 2){
+        
+        StaticJsonDocument<200> JSONbuffer;                           // make a json object
+        JsonArray array = JSONbuffer.to<JsonArray>();                 // create an array
+        JsonObject amperage = array.createNestedObject();             //create a nested object in the array
+        amperage["variable"] = "current";                             //add the variable info
+        amperage["unit"] = "A";
+        amperage["value"] = AmpsRMS;
+        char JSONmessageBuffer[200];
+        serializeJson(JSONbuffer, JSONmessageBuffer);
+        // publish the serialised buffer to the broker
+        if (client.publish("acs712", JSONmessageBuffer) == true)
+        {
+          Serial.println("Success sending message");
+        }
+        else
+        {
+          Serial.println("Error sending message");
+        }
+      }
       // IF the device is ON and the current is less than 0,5A for END_OF_CYCLE ms
       // THEN update the device state to OFF, and publish the state on the broker
-      if (AmpsRMS < 0.5 && device_state == 1)
+      if (AmpsRMS < 0.5 && device_state == 2)
       {
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
@@ -231,6 +288,12 @@ void loop()
       }
       state = 0;
     }
+   // every calibration_time we do the reading of VDD
+  if ((millis() - previous_calibration) >= calibration_time)
+    {                           
+        previous_calibration = millis(); //   update time
+        ADC_vdd = measure_vdd();
+     }
   }
 }
 
@@ -282,4 +345,35 @@ void setup_wifi()
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+}
+
+//function to measure VDD on channel 1 of the ADC converter
+float measure_vdd(void){
+  float ADC = 0;
+  // Measure Vdd. take the average of 1000 samples.
+  for (int i = 0; i < 1000; i++)
+  {
+    // wait for conversion to finish. (conversion takes 1160µs)
+    delay(2);
+    ADC = ADC + ADS.readADC(1);
+  }
+  ADC = ADC / 1000;
+  return ADC;
+}
+
+//function to read the counter from the filesystem
+uint32_t readNumberFile(fs::FS &fs, const char * path){
+    Serial.printf("Reading file: %s\r\n", path);
+    File file = fs.open(path);
+    if(!file || file.isDirectory()){
+        Serial.println("- failed to open file for reading");
+        return 0;
+    }
+  // Read the file into a uint32_t variable
+  uint32_t fileContent;
+  size_t bytesRead = file.readBytes((char*)&fileContent, sizeof(fileContent));
+
+  // Close the file
+  file.close();
+  return fileContent;
 }
