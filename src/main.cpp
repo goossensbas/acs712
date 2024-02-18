@@ -8,13 +8,15 @@
 #include <ESPmDNS.h>
 #include <ADS1X15.h>
 #include <LiquidCrystal_I2C.h>
+#include "secrets.h"
 
-#ifndef STASSID
-#define STASSID "AP_BAS_go"
-#define STAPSK "0499619079"
+//uncoomment or make a secret.h file with the following content:
+//#ifndef STASSID
+//#define STASSID "mySSID"
+//#define STAPSK "myPass"
 // TagoIO device token
-#define TAGO_TOKEN "3ced64a7-20ec-44af-88de-058729507baf"
-#endif
+//#define TAGO_TOKEN "TagoToken"
+//#endif
 
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
@@ -249,6 +251,8 @@ void loop()
         amperage["variable"] = "current";                             //add the variable info
         amperage["unit"] = "A";
         amperage["value"] = AmpsRMS;
+        JsonObject metadata = amperage.createNestedObject("metadata");
+        metadata["session_id"] = session_id;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         // publish the serialised buffer to the broker
@@ -268,12 +272,12 @@ void loop()
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
           device_state = 0;
-          StaticJsonDocument<200> JSONbuffer;
+          StaticJsonDocument<100> JSONbuffer;
           JsonArray array = JSONbuffer.to<JsonArray>();
           JsonObject state = array.createNestedObject();
           state["variable"] = "state";
           state["value"] = "off";
-          char JSONmessageBuffer[200];
+          char JSONmessageBuffer[100];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           if (client.publish("acs712/state", JSONmessageBuffer) == true)
           {
