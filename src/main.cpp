@@ -7,13 +7,15 @@
 #include <ESPmDNS.h>
 #include <ADS1X15.h>
 #include <LiquidCrystal_I2C.h>
+#include "secrets.h"
 
-#ifndef STASSID
-#define STASSID "AP_BAS_go"
-#define STAPSK "0499619079"
+//uncoomment or make a secret.h file with the following content:
+//#ifndef STASSID
+//#define STASSID "mySSID"
+//#define STAPSK "myPass"
 // TagoIO device token
-#define TAGO_TOKEN "3ced64a7-20ec-44af-88de-058729507baf"
-#endif
+//#define TAGO_TOKEN "TagoToken"
+//#endif
 
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
