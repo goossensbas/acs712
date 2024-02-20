@@ -10,6 +10,8 @@
 #include <LiquidCrystal_I2C.h>
 #include "secrets.h"
 
+#define BROKER_URL "mqtt.tago.io"
+
 //uncoomment or make a secret.h file with the following content:
 //#ifndef STASSID
 //#define STASSID "mySSID"
@@ -26,6 +28,8 @@ float intercept = 0.09;
 
 #define END_OF_CYCLE 10000
 
+unsigned long startTime = 0; // Variable to store the start time
+unsigned long elapsedTime;
 unsigned long printPeriod = 1000; // in milliseconds
 unsigned long previous_calibration = 0;
 unsigned long calibration_time = 60000; //period for recalibrating vdd in ms.
@@ -51,7 +55,7 @@ void callback(char *topic, byte *payload, unsigned int length)
                  "] payload [" + recv_payload + "]");
 }
 
-PubSubClient client("mqtt.tago.io", 1883, callback, espClient);
+PubSubClient client(BROKER_URL, 1883, callback, espClient);
 
 float ADC_value = 0;
 float AmpsRMS = 0;
@@ -59,7 +63,6 @@ int state = 0;
 double sum;
 double samples;
 uint32_t session_id = 0;
-uint32_t hours_operated = 0;
 
 float ADC_vdd = 0;
 
@@ -67,9 +70,18 @@ int device_state;
 int prev_device_state;
 
 //SPIFFS function definitions
+struct HoursOfOperationData {
+  uint32_t lastUpdate; // Last update time (Unix timestamp)
+  uint64_t hoursOfOperation; // Total hours of operation
+};
+
 uint32_t readNumberFile(fs::FS &fs, const char * path);
+HoursOfOperationData readTimeFromFile(fs::FS &fs, const char* counterfile);
+void writeTimeToFile(fs::FS &fs, const char* counterfile, const HoursOfOperationData &data);
 const char* counterfilename = "/counter.txt";
 const char* sessionfilename = "/session_id.txt";
+
+HoursOfOperationData TimeData;
 
 
 void connect_mqtt();
@@ -106,12 +118,10 @@ void setup()
       lcd.print("error counterfile");
       while(true);
     }
-    file.println(hours_operated);
     file.close();
   }
-  else{
-    hours_operated = readNumberFile(SPIFFS, counterfilename);
-  }
+  TimeData = readTimeFromFile(SPIFFS, counterfilename);
+
   // Check if the session ID file exists.
   // IF the file exists, read the contents into the variable 
   if (!SPIFFS.exists(sessionfilename)) {
@@ -124,7 +134,7 @@ void setup()
     }
     file.println(session_id);
     file.close();
-  }
+  }   
   else{
     session_id = readNumberFile(SPIFFS, sessionfilename);
   }
@@ -154,6 +164,7 @@ void setup()
   ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger ADC
+  startTime = millis();
 }
 
 void loop()
@@ -235,11 +246,13 @@ void loop()
         }
       }
 
-      //IF the device state has changed from OFF to ON, add 1 to session ID
+      //IF the device state has changed from OFF to ON, add 1 to session ID and update start time
       if (device_state == 1)
       {
         session_id = session_id + 1;
         device_state = 2;
+        startTime = millis();
+        elapsedTime = 0;
       }
 
       //Only send sensor data if the machine is ON
@@ -284,6 +297,11 @@ void loop()
             Serial.println("The cycle has ended");
           }
           EndOfCycle = millis();
+          Serial.println("Statistics:");
+          Serial.println("total seconds on:");
+          Serial.println(TimeData.hoursOfOperation);
+          Serial.println("last cycle in seconds:");
+          Serial.println(TimeData.lastUpdate);
         }
         else
         {
@@ -298,8 +316,28 @@ void loop()
         previous_calibration = millis(); //   update time
         ADC_vdd = measure_vdd();
      }
+  // If device is on, record the time that it was on.
+  if (device_state == 2){
+    // Calculate the elapsed time since the start time
+    elapsedTime = millis() - startTime;
+    TimeData.hoursOfOperation += elapsedTime / 1000; // Convert millis to seconds
+    TimeData.lastUpdate = elapsedTime;
+    writeTimeToFile(SPIFFS, counterfilename, TimeData);
+  }
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 void connect_mqtt()
 {
@@ -368,7 +406,7 @@ float measure_vdd(void){
 //function to read the counter from the filesystem
 uint32_t readNumberFile(fs::FS &fs, const char * path){
     Serial.printf("Reading file: %s\r\n", path);
-    File file = fs.open(path);
+    File file = fs.open(path, FILE_READ);
     if(!file || file.isDirectory()){
         Serial.println("- failed to open file for reading");
         return 0;
@@ -380,4 +418,40 @@ uint32_t readNumberFile(fs::FS &fs, const char * path){
   // Close the file
   file.close();
   return fileContent;
+}
+
+HoursOfOperationData readTimeFromFile(fs::FS &fs, const char* counterfile) {
+  Serial.printf("Reading file: %s\r\n", counterfile);
+  File file = fs.open(counterfile, FILE_READ);
+  if (!file) {
+    Serial.println("Failed to open file for reading");
+    return {0, 0}; // Return default values
+  }
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  if (error) {
+    Serial.println("Failed to parse file");
+    return {0, 0}; // Return default values
+  }
+  HoursOfOperationData data;
+  data.lastUpdate = doc["lastUpdate"];
+  data.hoursOfOperation = doc["hoursOfOperation"];
+  return data;
+}
+
+void writeTimeToFile(fs::FS &fs, const char* counterfile, const HoursOfOperationData &data) {
+  File file = SPIFFS.open(counterfile, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  StaticJsonDocument<256> doc;
+  doc["lastUpdate"] = data.lastUpdate;
+  doc["hoursOfOperation"] = data.hoursOfOperation;
+
+  if (serializeJson(doc, file) == 0) {
+    Serial.println("Failed to write to file");
+  }
+  file.close();
 }
