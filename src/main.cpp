@@ -320,7 +320,7 @@ void loop()
   if (device_state == 2){
     // Calculate the elapsed time since the start time
     elapsedTime = millis() - startTime;
-    TimeData.hoursOfOperation += elapsedTime / 1000; // Convert millis to seconds
+    TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate) / 1000; // Convert millis to seconds
     TimeData.lastUpdate = elapsedTime;
     writeTimeToFile(SPIFFS, counterfilename, TimeData);
   }
