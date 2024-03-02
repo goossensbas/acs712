@@ -11,6 +11,7 @@
 #include "secrets.h"
 
 #define BROKER_URL "mqtt.tago.io"
+#define WASMACHINE_ID 1
 
 //uncoomment or make a secret.h file with the following content:
 //#ifndef STASSID
@@ -266,6 +267,9 @@ void loop()
         amperage["value"] = AmpsRMS;
         JsonObject metadata = amperage.createNestedObject("metadata");
         metadata["session_id"] = session_id;
+        metadata["wasmachine_id"] = WASMACHINE_ID;
+        metadata["this_cycle_time"] = elapsedTime;
+        metadata["total_time_operated"] = TimeData.hoursOfOperation;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         // publish the serialised buffer to the broker
