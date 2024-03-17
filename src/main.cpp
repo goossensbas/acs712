@@ -12,14 +12,16 @@
 
 #define BROKER_URL "mqtt.tago.io"
 #define WASMACHINE_ID 1
+#define session_ID 1 
+//TODO: session id van 0000, 1000 en 2000 starten voor elke meter.
 
-//uncoomment or make a secret.h file with the following content:
-//#ifndef STASSID
-//#define STASSID "mySSID"
-//#define STAPSK "myPass"
-// TagoIO device token
-//#define TAGO_TOKEN "TagoToken"
-//#endif
+// uncoomment or make a secret.h file with the following content:
+// #ifndef STASSID
+// #define STASSID "mySSID"
+// #define STAPSK "myPass"
+//  TagoIO device token
+// #define TAGO_TOKEN "TagoToken"
+// #endif
 
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x3F, 16, 2);
@@ -33,7 +35,7 @@ unsigned long startTime = 0; // Variable to store the start time
 unsigned long elapsedTime;
 unsigned long printPeriod = 1000; // in milliseconds
 unsigned long previous_calibration = 0;
-unsigned long calibration_time = 60000; //period for recalibrating vdd in ms.
+unsigned long calibration_time = 60000; // period for recalibrating vdd in ms.
 // Track time in milliseconds since last reading
 unsigned long previousMillis = 0;
 unsigned long lastSample = 0;
@@ -70,20 +72,20 @@ float ADC_vdd = 0;
 int device_state;
 int prev_device_state;
 
-//SPIFFS function definitions
-struct HoursOfOperationData {
-  uint32_t lastUpdate; // Last update time (Unix timestamp)
+// SPIFFS function definitions
+struct HoursOfOperationData
+{
+  uint32_t lastUpdate;       // Last update time (Unix timestamp)
   uint64_t hoursOfOperation; // Total hours of operation
 };
 
-uint32_t readNumberFile(fs::FS &fs, const char * path);
-HoursOfOperationData readTimeFromFile(fs::FS &fs, const char* counterfile);
-void writeTimeToFile(fs::FS &fs, const char* counterfile, const HoursOfOperationData &data);
-const char* counterfilename = "/counter.txt";
-const char* sessionfilename = "/session_id.txt";
+uint32_t readNumberFile(fs::FS &fs, const char *path);
+HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile);
+void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperationData &data);
+const char *counterfilename = "/counter.txt";
+const char *sessionfilename = "/session_id.txt";
 
 HoursOfOperationData TimeData;
-
 
 void connect_mqtt();
 void setup_wifi();
@@ -100,52 +102,61 @@ void setup()
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger ADC
 
-  lcd.init();         //init the LCD
-  lcd.backlight();    // Turn on the backlight on LCD.
+  lcd.init();      // init the LCD
+  lcd.backlight(); // Turn on the backlight on LCD.
 
-//start the filesystem. If there is an error, loop infinitely.
-  if (!SPIFFS.begin(true)) {
+  // start the filesystem. If there is an error, loop infinitely.
+  if (!SPIFFS.begin(true))
+  {
     Serial.println("An error occurred while mounting SPIFFS");
     lcd.print("Filesystem error!");
-    while(true);
+    while (true)
+      ;
   }
   // Check if the counter file exists.
-  // IF the file exists, read the contents into the variable 
-  if (!SPIFFS.exists(counterfilename)) {
+  // IF the file exists, read the contents into the variable
+  if (!SPIFFS.exists(counterfilename))
+  {
     Serial.println("Counter File does not exist. Creating...");
     File file = SPIFFS.open(counterfilename, "w");
-    if (!file) {
+    if (!file)
+    {
       Serial.println("Failed to create file");
       lcd.print("error counterfile");
-      while(true);
+      while (true)
+        ;
     }
     file.close();
   }
   TimeData = readTimeFromFile(SPIFFS, counterfilename);
 
   // Check if the session ID file exists.
-  // IF the file exists, read the contents into the variable 
-  if (!SPIFFS.exists(sessionfilename)) {
+  // IF the file exists, read the contents into the variable
+  if (!SPIFFS.exists(sessionfilename))
+  {
     Serial.println("Session File does not exist. Creating...");
     File file = SPIFFS.open(sessionfilename, "w");
-    if (!file) {
+    if (!file)
+    {
       Serial.println("Failed to create file");
       lcd.print("error sessionfile");
-      while(true);
+      while (true)
+        ;
     }
     file.println(session_id);
     file.close();
-  }   
-  else{
+  }
+  else
+  {
     session_id = readNumberFile(SPIFFS, sessionfilename);
   }
   lcd.print("EcoWashMate");
-// Show welcome message. Meanwhile wait for vdd to stabilise
+  // Show welcome message. Meanwhile wait for vdd to stabilise
   delay(2000);
   lcd.clear();
   lcd.print("calibrating...");
 
-//function to measure vdd
+  // function to measure vdd
   ADC_vdd = measure_vdd();
 
   lcd.clear();
@@ -210,6 +221,9 @@ void loop()
         // calculate the RMS value. square root sum, multiply by voltage per value and multiply by slope (mV/A).
         // intercept is the zero adjustment.
         AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept;
+
+        // TODO: convert to INT in mA
+        int(AmpsRMS * 1000);
         if (AmpsRMS < 0)
         {
           AmpsRMS = 0;
@@ -227,7 +241,7 @@ void loop()
     // state 3: send the values to MQTT broker
     if (state == 3)
     {
-      
+
       Serial.print(device_state);
       // IF the device is OFF and the current is more than 0,5A
       // THEN update the device state to ON, and publish the state on the broker
@@ -247,7 +261,7 @@ void loop()
         }
       }
 
-      //IF the device state has changed from OFF to ON, add 1 to session ID and update start time
+      // IF the device state has changed from OFF to ON, add 1 to session ID and update start time
       if (device_state == 1)
       {
         session_id = session_id + 1;
@@ -256,17 +270,19 @@ void loop()
         elapsedTime = 0;
       }
 
-      //Only send sensor data if the machine is ON
-      if (device_state == 2){
-        
-        StaticJsonDocument<200> JSONbuffer;                           // make a json object
-        JsonArray array = JSONbuffer.to<JsonArray>();                 // create an array
-        JsonObject amperage = array.createNestedObject();             //create a nested object in the array
-        amperage["variable"] = "current";                             //add the variable info
-        amperage["unit"] = "A";
+      // Only send sensor data if the machine is ON
+      //TODO: send value in mA as INT.
+      if (device_state == 2)
+      {
+
+        StaticJsonDocument<200> JSONbuffer;               // make a json object
+        JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
+        JsonObject amperage = array.createNestedObject(); // create a nested object in the array
+        amperage["variable"] = "current";                 // add the variable info
+        amperage["group"] = session_id
+            amperage["unit"] = "A";
         amperage["value"] = AmpsRMS;
         JsonObject metadata = amperage.createNestedObject("metadata");
-        metadata["session_id"] = session_id;
         metadata["wasmachine_id"] = WASMACHINE_ID;
         metadata["this_cycle_time"] = elapsedTime;
         metadata["total_time_operated"] = TimeData.hoursOfOperation;
@@ -314,34 +330,23 @@ void loop()
       }
       state = 0;
     }
-   // every calibration_time we do the reading of VDD
-  if ((millis() - previous_calibration) >= calibration_time)
-    {                           
-        previous_calibration = millis(); //   update time
-        ADC_vdd = measure_vdd();
-     }
-  // If device is on, record the time that it was on.
-  if (device_state == 2){
-    // Calculate the elapsed time since the start time
-    elapsedTime = millis() - startTime;
-    TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate) / 1000; // Convert millis to seconds
-    TimeData.lastUpdate = elapsedTime;
-    writeTimeToFile(SPIFFS, counterfilename, TimeData);
-  }
+    // every calibration_time we do the reading of VDD
+    if ((millis() - previous_calibration) >= calibration_time)
+    {
+      previous_calibration = millis(); //   update time
+      ADC_vdd = measure_vdd();
+    }
+    // If device is on, record the time that it was on.
+    if (device_state == 2)
+    {
+      // Calculate the elapsed time since the start time
+      elapsedTime = millis() - startTime;
+      TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate) / 1000; // Convert millis to seconds
+      TimeData.lastUpdate = elapsedTime;
+      writeTimeToFile(SPIFFS, counterfilename, TimeData);
+    }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 void connect_mqtt()
 {
@@ -393,8 +398,9 @@ void setup_wifi()
   Serial.println(WiFi.localIP());
 }
 
-//function to measure VDD on channel 1 of the ADC converter
-float measure_vdd(void){
+// function to measure VDD on channel 1 of the ADC converter
+float measure_vdd(void)
+{
   float ADC = 0;
   // Measure Vdd. take the average of 1000 samples.
   for (int i = 0; i < 1000; i++)
@@ -407,34 +413,39 @@ float measure_vdd(void){
   return ADC;
 }
 
-//function to read the counter from the filesystem
-uint32_t readNumberFile(fs::FS &fs, const char * path){
-    Serial.printf("Reading file: %s\r\n", path);
-    File file = fs.open(path, FILE_READ);
-    if(!file || file.isDirectory()){
-        Serial.println("- failed to open file for reading");
-        return 0;
-    }
+// function to read the counter from the filesystem
+uint32_t readNumberFile(fs::FS &fs, const char *path)
+{
+  Serial.printf("Reading file: %s\r\n", path);
+  File file = fs.open(path, FILE_READ);
+  if (!file || file.isDirectory())
+  {
+    Serial.println("- failed to open file for reading");
+    return 0;
+  }
   // Read the file into a uint32_t variable
   uint32_t fileContent;
-  size_t bytesRead = file.readBytes((char*)&fileContent, sizeof(fileContent));
+  size_t bytesRead = file.readBytes((char *)&fileContent, sizeof(fileContent));
 
   // Close the file
   file.close();
   return fileContent;
 }
 
-HoursOfOperationData readTimeFromFile(fs::FS &fs, const char* counterfile) {
+HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
+{
   Serial.printf("Reading file: %s\r\n", counterfile);
   File file = fs.open(counterfile, FILE_READ);
-  if (!file) {
+  if (!file)
+  {
     Serial.println("Failed to open file for reading");
     return {0, 0}; // Return default values
   }
   StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, file);
   file.close();
-  if (error) {
+  if (error)
+  {
     Serial.println("Failed to parse file");
     return {0, 0}; // Return default values
   }
@@ -444,9 +455,11 @@ HoursOfOperationData readTimeFromFile(fs::FS &fs, const char* counterfile) {
   return data;
 }
 
-void writeTimeToFile(fs::FS &fs, const char* counterfile, const HoursOfOperationData &data) {
+void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperationData &data)
+{
   File file = SPIFFS.open(counterfile, FILE_WRITE);
-  if (!file) {
+  if (!file)
+  {
     Serial.println("Failed to open file for writing");
     return;
   }
@@ -454,7 +467,8 @@ void writeTimeToFile(fs::FS &fs, const char* counterfile, const HoursOfOperation
   doc["lastUpdate"] = data.lastUpdate;
   doc["hoursOfOperation"] = data.hoursOfOperation;
 
-  if (serializeJson(doc, file) == 0) {
+  if (serializeJson(doc, file) == 0)
+  {
     Serial.println("Failed to write to file");
   }
   file.close();
