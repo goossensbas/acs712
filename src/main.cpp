@@ -12,8 +12,9 @@
 
 #define BROKER_URL "mqtt.tago.io"
 #define WASMACHINE_ID 1
-#define session_ID 1 
-//TODO: session id van 0000, 1000 en 2000 starten voor elke meter.
+#define SESSION_ID 1 
+// session id from 0000, 1000 and 2000 for each device.
+// The session ID will only be rewritten when the file is erased.
 
 // uncoomment or make a secret.h file with the following content:
 // #ifndef STASSID
@@ -82,6 +83,7 @@ struct HoursOfOperationData
 uint32_t readNumberFile(fs::FS &fs, const char *path);
 HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile);
 void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperationData &data);
+void writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id);
 const char *counterfilename = "/counter.txt";
 const char *sessionfilename = "/session_id.txt";
 
@@ -126,6 +128,8 @@ void setup()
       while (true)
         ;
     }
+    else
+    file.print(SESSION_ID);
     file.close();
   }
   TimeData = readTimeFromFile(SPIFFS, counterfilename);
@@ -261,17 +265,18 @@ void loop()
         }
       }
 
-      // IF the device state has changed from OFF to ON, add 1 to session ID and update start time
+      // IF the device state has changed from OFF to ON, increment session ID and write it to file, update start time
       if (device_state == 1)
       {
         session_id = session_id + 1;
+        writeNumberToFile(SPIFFS, sessionfilename, session_id);
         device_state = 2;
         startTime = millis();
         elapsedTime = 0;
       }
 
       // Only send sensor data if the machine is ON
-      //TODO: send value in mA as INT.
+      // send value in mA as INT.
       if (device_state == 2)
       {
 
@@ -279,9 +284,9 @@ void loop()
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
         amperage["variable"] = "current";                 // add the variable info
-        amperage["group"] = session_id
-            amperage["unit"] = "A";
-        amperage["value"] = AmpsRMS;
+        amperage["group"] = session_id;
+        amperage["unit"] = "mA";
+        amperage["value"] = int(AmpsRMS * 1000);
         JsonObject metadata = amperage.createNestedObject("metadata");
         metadata["wasmachine_id"] = WASMACHINE_ID;
         metadata["this_cycle_time"] = elapsedTime;
@@ -470,6 +475,19 @@ void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperation
   if (serializeJson(doc, file) == 0)
   {
     Serial.println("Failed to write to file");
+    return;
   }
+  
   file.close();
+}
+
+int writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
+  File file = SPIFFS.open(counterfile, FILE_WRITE);
+  if (!file)
+  {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  file.print(session_id);
+  return;
 }
