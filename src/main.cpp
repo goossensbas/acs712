@@ -13,6 +13,8 @@
 #define BROKER_URL "mqtt.tago.io"
 #define WASMACHINE_ID 1
 #define SESSION_ID 1 
+#define END_OF_CYCLE 30000
+
 // session id from 0000, 1000 and 2000 for each device.
 // The session ID will only be rewritten when the file is erased.
 
@@ -30,7 +32,7 @@ LiquidCrystal_I2C lcd(0x3F, 16, 2);
 float slope = 10;
 float intercept = 0.09;
 
-#define END_OF_CYCLE 10000
+
 
 unsigned long startTime = 0; // Variable to store the start time
 unsigned long elapsedTime;
@@ -276,7 +278,7 @@ void loop()
       }
 
       // Only send sensor data if the machine is ON
-      // send value in mA as INT.
+      // send the value in mA as INT.
       if (device_state == 2)
       {
 
