@@ -483,7 +483,7 @@ void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperation
   file.close();
 }
 
-int writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
+void writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
   File file = SPIFFS.open(counterfile, FILE_WRITE);
   if (!file)
   {
