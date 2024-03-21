@@ -12,7 +12,7 @@
 
 #define BROKER_URL "mqtt.tago.io"
 #define WASMACHINE_ID 1
-#define SESSION_ID 1 
+#define SESSION_ID 2000
 #define END_OF_CYCLE 30000
 
 // session id from 0000, 1000 and 2000 for each device.
@@ -31,7 +31,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 10;
-float intercept = 0.18;
+float intercept = 0.1;
 
 
 
@@ -81,7 +81,7 @@ struct HoursOfOperationData
   uint32_t lastUpdate;       // Last update time (Unix timestamp)
   uint64_t hoursOfOperation; // Total hours of operation
 };
-
+HoursOfOperationData init_time;
 uint32_t readNumberFile(fs::FS &fs, const char *path);
 HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile);
 void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperationData &data);
@@ -130,7 +130,9 @@ void setup()
         ;
     }
     else
-    file.print(SESSION_ID);
+    init_time.hoursOfOperation = 0;
+    init_time.lastUpdate = 0;
+    writeTimeToFile(SPIFFS, counterfilename, TimeData);
     file.close();
   }
   TimeData = readTimeFromFile(SPIFFS, counterfilename);
@@ -288,7 +290,9 @@ void loop()
       // send the value in mA as INT.
       if (device_state == 2)
       {
-
+        if(!client.connected()){
+          connect_mqtt();
+        }
         StaticJsonDocument<200> JSONbuffer;               // make a json object
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
