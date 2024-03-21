@@ -1,6 +1,6 @@
 #ifndef STASSID
-#define STASSID "AP_BAS_go"
+#define STASSID "Bas&Sanja"
 #define STAPSK "0499619079"
 // TagoIO device token
-#define TAGO_TOKEN "3ced64a7-20ec-44af-88de-058729507baf"
+#define TAGO_TOKEN "488ebfbb-80fc-4d55-b569-e63d2bc74656"
 #endif

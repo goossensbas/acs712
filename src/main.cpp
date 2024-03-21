@@ -27,18 +27,18 @@
 // #endif
 
 ADS1115 ADS(0x48);
-LiquidCrystal_I2C lcd(0x3F, 16, 2);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+// change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 10;
-float intercept = 0.09;
+float intercept = 0.18;
 
 
 
 unsigned long startTime = 0; // Variable to store the start time
 unsigned long elapsedTime;
 unsigned long printPeriod = 1000; // in milliseconds
-unsigned long previous_calibration = 0;
-unsigned long calibration_time = 60000; // period for recalibrating vdd in ms.
+
 // Track time in milliseconds since last reading
 unsigned long previousMillis = 0;
 unsigned long lastSample = 0;
@@ -93,7 +93,6 @@ HoursOfOperationData TimeData;
 
 void connect_mqtt();
 void setup_wifi();
-float measure_vdd(void);
 
 void setup()
 {
@@ -162,8 +161,14 @@ void setup()
   lcd.clear();
   lcd.print("calibrating...");
 
-  // function to measure vdd
-  ADC_vdd = measure_vdd();
+  // Measure Vdd. take the average of 1000 samples.
+  for (int i = 0; i < 1000; i++)
+  {
+    // wait for conversion to finish. (conversion takes 1160µs)
+    delay(2);
+    ADC_vdd = ADC_vdd + ADS.readADC(1);
+  }
+  ADC_vdd = ADC_vdd / 1000;
 
   lcd.clear();
   lcd.print("Vdd = ");
@@ -264,6 +269,8 @@ void loop()
         if (client.publish("acs712/state", JSONmessageBuffer) == true)
         {
           Serial.println("The cycle has started");
+          lcd.setCursor(0,1);
+          lcd.print("cycle started");
         }
       }
 
@@ -322,6 +329,8 @@ void loop()
           if (client.publish("acs712/state", JSONmessageBuffer) == true)
           {
             Serial.println("The cycle has ended");
+            lcd.setCursor(0,1);
+            lcd.print("cycle stopped");
           }
           EndOfCycle = millis();
           Serial.println("Statistics:");
@@ -336,12 +345,6 @@ void loop()
         }
       }
       state = 0;
-    }
-    // every calibration_time we do the reading of VDD
-    if ((millis() - previous_calibration) >= calibration_time)
-    {
-      previous_calibration = millis(); //   update time
-      ADC_vdd = measure_vdd();
     }
     // If device is on, record the time that it was on.
     if (device_state == 2)
