@@ -32,7 +32,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 10;
-float intercept = 0.09;
+float intercept = 0.12;
 
 
 
@@ -69,7 +69,7 @@ float AmpsRMS = 0;
 int state = 0;
 double sum;
 double samples;
-uint32_t session_id = 0;
+uint32_t session_id = SESSION_ID;
 
 float ADC_vdd = 0;
 
@@ -79,8 +79,8 @@ int prev_device_state;
 // SPIFFS function definitions
 struct HoursOfOperationData
 {
-  uint32_t lastUpdate;       // Last update time (Unix timestamp)
-  uint32_t hoursOfOperation; // Total hours of operation
+  unsigned long lastUpdate;       // Last update time (Unix timestamp)
+  unsigned long hoursOfOperation; // Total hours of operation
 };
 HoursOfOperationData init_time;
 uint32_t readNumberFile(fs::FS &fs, const char *path);
@@ -156,7 +156,7 @@ void setup()
       while (true)
         ;
     }
-    file.println(SESSION_ID);
+    writeNumberToFile(SPIFFS, counterfilename, SESSION_ID);
     file.close();
   }
   session_id = readNumberFile(SPIFFS, sessionfilename);
@@ -242,8 +242,6 @@ void loop()
         // intercept is the zero adjustment.
         AmpsRMS = (sqrt(sum) * (6.144 / 32768) * slope) - intercept;
 
-        // TODO: convert to INT in mA
-        int(AmpsRMS * 1000);
         if (AmpsRMS < 0)
         {
           AmpsRMS = 0;
@@ -278,7 +276,7 @@ void loop()
         meta["wasmachine_id"] = WASMACHINE_ID;
         meta["sensor_id"] = WASMACHINE_ID;
         meta["this_cycle_time"] = (elapsedTime / 1000);
-        meta["total_time_operated"] = TimeData.hoursOfOperation;
+        meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         if (client.publish("acs712/state", JSONmessageBuffer) == true)
@@ -301,7 +299,7 @@ void loop()
 
       // Only send sensor data if the machine is ON
       // send the value in mA as INT.
-      if (device_state == 2)
+      if (device_state == 2 || device_state == 3)
       {
         if(!client.connected()){
           connect_mqtt();
@@ -317,7 +315,7 @@ void loop()
         metadata["sensor_id"] = SENSOR_ID;
         metadata["wasmachine_id"] = WASMACHINE_ID;
         metadata["this_cycle_time"] = (elapsedTime / 1000);
-        metadata["total_time_operated"] = TimeData.hoursOfOperation;
+        metadata["total_time_operated"] = TimeData.hoursOfOperation / 1000;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         // publish the serialised buffer to the broker
@@ -332,8 +330,13 @@ void loop()
       }
       // IF the device is ON and the current is less than 0,5A for END_OF_CYCLE ms
       // THEN update the device state to OFF, and publish the state on the broker
+      
       if (AmpsRMS < 0.5 && device_state == 2)
       {
+        device_state = 3;
+        EndOfCycle = millis();
+      }
+      if (device_state == 3){
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
           device_state = 0;
@@ -347,7 +350,7 @@ void loop()
           meta["wasmachine_id"] = WASMACHINE_ID;
           meta["sensor_id"] = WASMACHINE_ID;
           meta["this_cycle_time"] = (elapsedTime / 1000);
-          meta["total_time_operated"] = TimeData.hoursOfOperation;
+          meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
           char JSONmessageBuffer[100];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           if (client.publish("acs712/state", JSONmessageBuffer) == true)
@@ -356,26 +359,25 @@ void loop()
             lcd.setCursor(0,1);
             lcd.print("cycle stopped");
           }
-          EndOfCycle = millis();
+          Serial.println(millis() - EndOfCycle);
+          
+          
           Serial.println("Statistics:");
           Serial.println("total seconds on:");
-          Serial.println(TimeData.hoursOfOperation);
+          Serial.println(TimeData.hoursOfOperation / 1000);
           Serial.println("last cycle in seconds:");
           Serial.println(TimeData.lastUpdate);
-        }
-        else
-        {
-          EndOfCycle = millis();
-        }
+        }     
       }
       state = 0;
     }
     // If device is on, record the time that it was on.
-    if (device_state == 2)
+    if (device_state == 2 || device_state == 3)
     {
       // Calculate the elapsed time since the start time
       elapsedTime = millis() - startTime;
-      TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate) / 1000; // Convert millis to seconds
+      TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate);
+      Serial.println(TimeData.hoursOfOperation);
       TimeData.lastUpdate = elapsedTime;
       writeTimeToFile(SPIFFS, counterfilename, TimeData);
     }
@@ -457,12 +459,14 @@ uint32_t readNumberFile(fs::FS &fs, const char *path)
     Serial.println("- failed to open file for reading");
     return 0;
   }
-  // Read the file into a uint32_t variable
-  uint32_t fileContent;
-  size_t bytesRead = file.readBytes((char *)&fileContent, sizeof(fileContent));
-
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, file);
   // Close the file
   file.close();
+  // Read the file into a uint32_t variable
+  uint32_t fileContent;
+  fileContent = doc["session_id"];
+
   return fileContent;
 }
 
@@ -486,8 +490,6 @@ HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
   HoursOfOperationData data;
   data.lastUpdate = doc["lastUpdate"] ;
   data.hoursOfOperation  = doc["hoursOfOperation"] ;
-  data.lastUpdate = data.lastUpdate * 1000;
-  data.hoursOfOperation = data.hoursOfOperation * 1000;
   return data;
 }
 
@@ -500,8 +502,8 @@ void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperation
     return;
   }
   StaticJsonDocument<256> doc;
-  doc["lastUpdate"] = data.lastUpdate / 1000;
-  doc["hoursOfOperation"] = data.hoursOfOperation / 1000 ;
+  doc["lastUpdate"] = data.lastUpdate;
+  doc["hoursOfOperation"] = data.hoursOfOperation ;
 
   if (serializeJson(doc, file) == 0)
   {
@@ -519,6 +521,13 @@ void writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
     Serial.println("Failed to open file for writing");
     return;
   }
-  file.print(session_id);
+    StaticJsonDocument<256> doc;
+  doc["session_id"] = session_id;
+
+  if (serializeJson(doc, file) == 0)
+  {
+    Serial.println("Failed to write to file");
+    return;
+  }
   return;
 }
