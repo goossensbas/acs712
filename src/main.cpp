@@ -11,9 +11,10 @@
 #include "secrets.h"
 
 #define BROKER_URL "mqtt.tago.io"
-#define WASMACHINE_ID 1
+#define WASMACHINE_ID 2
+#define SENSOR_ID 2
 #define SESSION_ID 2000
-#define END_OF_CYCLE 30000
+#define END_OF_CYCLE 20000
 
 // session id from 0000, 1000 and 2000 for each device.
 // The session ID will only be rewritten when the file is erased.
@@ -31,7 +32,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 10;
-float intercept = 0.1;
+float intercept = 0.09;
 
 
 
@@ -79,7 +80,7 @@ int prev_device_state;
 struct HoursOfOperationData
 {
   uint32_t lastUpdate;       // Last update time (Unix timestamp)
-  uint64_t hoursOfOperation; // Total hours of operation
+  uint32_t hoursOfOperation; // Total hours of operation
 };
 HoursOfOperationData init_time;
 uint32_t readNumberFile(fs::FS &fs, const char *path);
@@ -116,7 +117,7 @@ void setup()
     while (true)
       ;
   }
-  // Check if the counter file exists.
+  // Check if the time counter file exists.
   // IF the file exists, read the contents into the variable
   if (!SPIFFS.exists(counterfilename))
   {
@@ -132,10 +133,15 @@ void setup()
     else
     init_time.hoursOfOperation = 0;
     init_time.lastUpdate = 0;
-    writeTimeToFile(SPIFFS, counterfilename, TimeData);
+    writeTimeToFile(SPIFFS, counterfilename, init_time);
     file.close();
   }
   TimeData = readTimeFromFile(SPIFFS, counterfilename);
+
+  //RESET TIME
+  //  init_time.hoursOfOperation = 0;
+  //  init_time.lastUpdate = 0;
+  //  writeTimeToFile(SPIFFS, counterfilename, init_time);
 
   // Check if the session ID file exists.
   // IF the file exists, read the contents into the variable
@@ -150,13 +156,14 @@ void setup()
       while (true)
         ;
     }
-    file.println(session_id);
+    file.println(SESSION_ID);
     file.close();
   }
-  else
-  {
-    session_id = readNumberFile(SPIFFS, sessionfilename);
-  }
+  session_id = readNumberFile(SPIFFS, sessionfilename);
+
+  //RESET SESSION ID
+  //writeNumberToFile(SPIFFS, sessionfilename, SESSION_ID);
+  
   lcd.print("EcoWashMate");
   // Show welcome message. Meanwhile wait for vdd to stabilise
   delay(2000);
@@ -265,7 +272,13 @@ void loop()
         JsonArray array = JSONbuffer.to<JsonArray>();
         JsonObject state = array.createNestedObject();
         state["variable"] = "state";
-        state["value"] = "on";
+        state["value"] = "1"; // 1 = ON
+        state["group"] = String(session_id);
+        JsonObject meta = state.createNestedObject("metadata");
+        meta["wasmachine_id"] = WASMACHINE_ID;
+        meta["sensor_id"] = WASMACHINE_ID;
+        meta["this_cycle_time"] = (elapsedTime / 1000);
+        meta["total_time_operated"] = TimeData.hoursOfOperation;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         if (client.publish("acs712/state", JSONmessageBuffer) == true)
@@ -297,12 +310,13 @@ void loop()
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
         amperage["variable"] = "current";                 // add the variable info
-        amperage["group"] = session_id;
+        amperage["group"] = String(session_id);
         amperage["unit"] = "mA";
         amperage["value"] = int(AmpsRMS * 1000);
         JsonObject metadata = amperage.createNestedObject("metadata");
+        metadata["sensor_id"] = SENSOR_ID;
         metadata["wasmachine_id"] = WASMACHINE_ID;
-        metadata["this_cycle_time"] = elapsedTime;
+        metadata["this_cycle_time"] = (elapsedTime / 1000);
         metadata["total_time_operated"] = TimeData.hoursOfOperation;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
@@ -327,7 +341,13 @@ void loop()
           JsonArray array = JSONbuffer.to<JsonArray>();
           JsonObject state = array.createNestedObject();
           state["variable"] = "state";
-          state["value"] = "off";
+          state["value"] = "2"; //2 = OFF
+          state["group"] = String(session_id);
+          JsonObject meta = state.createNestedObject("metadata");
+          meta["wasmachine_id"] = WASMACHINE_ID;
+          meta["sensor_id"] = WASMACHINE_ID;
+          meta["this_cycle_time"] = (elapsedTime / 1000);
+          meta["total_time_operated"] = TimeData.hoursOfOperation;
           char JSONmessageBuffer[100];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           if (client.publish("acs712/state", JSONmessageBuffer) == true)
@@ -464,8 +484,10 @@ HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
     return {0, 0}; // Return default values
   }
   HoursOfOperationData data;
-  data.lastUpdate = doc["lastUpdate"];
-  data.hoursOfOperation = doc["hoursOfOperation"];
+  data.lastUpdate = doc["lastUpdate"] ;
+  data.hoursOfOperation  = doc["hoursOfOperation"] ;
+  data.lastUpdate = data.lastUpdate * 1000;
+  data.hoursOfOperation = data.hoursOfOperation * 1000;
   return data;
 }
 
@@ -478,8 +500,8 @@ void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperation
     return;
   }
   StaticJsonDocument<256> doc;
-  doc["lastUpdate"] = data.lastUpdate;
-  doc["hoursOfOperation"] = data.hoursOfOperation;
+  doc["lastUpdate"] = data.lastUpdate / 1000;
+  doc["hoursOfOperation"] = data.hoursOfOperation / 1000 ;
 
   if (serializeJson(doc, file) == 0)
   {
