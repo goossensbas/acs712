@@ -15,21 +15,25 @@
 #define BROKER_URL "mqtt.tago.io"
 #define LOCAL_BROKER_URL "basandsanja.duckdns.org"
 #define LOCAL_BROKER_PORT 1884
-#define WASMACHINE_ID 2
-#define SENSOR_ID 2
-#define SESSION_ID 2000
+
 #define END_OF_CYCLE 20000
 
-// session id from 0000, 1000 and 2000 for each device.
-// The session ID will only be rewritten when the file is erased.
+
+
 
 // uncoomment or make a secret.h file with the following content:
 // #ifndef STASSID
 // #define STASSID "mySSID"
 // #define STAPSK "myPass"
-//  TagoIO device token
-// #define TAGO_TOKEN "TagoToken"
 // #endif
+//   TagoIO device token
+// #define TAGO_TOKEN "TagoToken"
+//   Device settings: see excel table
+//          session id from 0000, 1000 and 2000 for each device.
+//          The session ID will only be rewritten when the file is erased.
+// #define WASMACHINE_ID 9999
+// #define SENSOR_ID 9999
+// #define SESSION_ID 9999
 
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
