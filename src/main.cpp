@@ -10,7 +10,11 @@
 #include <LiquidCrystal_I2C.h>
 #include "secrets.h"
 
+#define TAGO
+#define LOCAL
 #define BROKER_URL "mqtt.tago.io"
+#define LOCAL_BROKER_URL "basandsanja.duckdns.org"
+#define LOCAL_BROKER_PORT 1884
 #define WASMACHINE_ID 2
 #define SENSOR_ID 2
 #define SESSION_ID 2000
@@ -51,7 +55,7 @@ const char *password = STAPSK;
 WiFiClient espClient;
 
 // callback function for mqtt. Obligatory for PubSubclient.
-void callback(char *topic, byte *payload, unsigned int length)
+void callback1(char *topic, byte *payload, unsigned int length)
 {
   // do something with the message
 
@@ -61,9 +65,22 @@ void callback(char *topic, byte *payload, unsigned int length)
   Serial.println("mqtt_callback - message arrived - topic [" + topicStr +
                  "] payload [" + recv_payload + "]");
 }
+void callback2(char *topic, byte *payload, unsigned int length)
+{
+  // do something with the message
 
-PubSubClient client(BROKER_URL, 1883, callback, espClient);
+  String topicStr = topic;
+  String recv_payload = String((char *)payload);
 
+  Serial.println("mqtt_callback - message arrived - topic [" + topicStr +
+                 "] payload [" + recv_payload + "]");
+}
+#ifdef TAGO
+PubSubClient tago_client(BROKER_URL, 1883, callback1, espClient);
+#endif
+#ifdef LOCAL
+PubSubClient local_client(LOCAL_BROKER_URL, LOCAL_BROKER_PORT, callback2, espClient);
+#endif
 float ADC_value = 0;
 float AmpsRMS = 0;
 int state = 0;
@@ -279,12 +296,19 @@ void loop()
         meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
-        if (client.publish("acs712/state", JSONmessageBuffer) == true)
+        #ifdef TAGO
+        if (tago_client.publish("acs712/state", JSONmessageBuffer) == true)
         {
           Serial.println("The cycle has started");
           lcd.setCursor(0,1);
           lcd.print("cycle started");
         }
+        #endif
+        #ifdef LOCAL
+        if (local_client.publish("meter2/state", JSONmessageBuffer) == true){
+          Serial.println("published to local client");
+        }
+        #endif
       }
 
       // IF the device state has changed from OFF to ON, increment session ID and write it to file, update start time
@@ -301,9 +325,16 @@ void loop()
       // send the value in mA as INT.
       if (device_state == 2 || device_state == 3)
       {
-        if(!client.connected()){
+        #ifdef TAGO
+        if(!(tago_client.connected())){
           connect_mqtt();
         }
+        #endif
+        #ifdef LOCAL
+        if(!(local_client.connected())){
+          connect_mqtt();
+        }
+        #endif
         StaticJsonDocument<200> JSONbuffer;               // make a json object
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
@@ -319,7 +350,8 @@ void loop()
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         // publish the serialised buffer to the broker
-        if (client.publish("acs712", JSONmessageBuffer) == true)
+        #ifdef TAGO
+        if (tago_client.publish("acs712", JSONmessageBuffer) == true)
         {
           Serial.println("Success sending message");
         }
@@ -327,6 +359,17 @@ void loop()
         {
           Serial.println("Error sending message");
         }
+        #endif
+        #ifdef LOCAL
+        if (local_client.publish("meter2", JSONmessageBuffer) == true)
+        {
+          Serial.println("published to local client");
+        }
+        else
+        {
+          Serial.println("Error sending message to local client");
+        }
+        #endif
       }
       // IF the device is ON and the current is less than 0,5A for END_OF_CYCLE ms
       // THEN update the device state to OFF, and publish the state on the broker
@@ -353,12 +396,23 @@ void loop()
           meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
           char JSONmessageBuffer[100];
           serializeJson(JSONbuffer, JSONmessageBuffer);
-          if (client.publish("acs712/state", JSONmessageBuffer) == true)
+          #ifdef TAGO
+          if (tago_client.publish("acs712/state", JSONmessageBuffer) == true)
           {
             Serial.println("The cycle has ended");
             lcd.setCursor(0,1);
             lcd.print("cycle stopped");
           }
+          #endif
+          #ifdef LOCAL
+          if (local_client.publish("meter2/state", JSONmessageBuffer) == true)
+          {
+            Serial.println("published to local client)");
+            Serial.println("The cycle has ended");
+            lcd.setCursor(0,1);
+            lcd.print("cycle stopped");
+          }
+          #endif
           Serial.println(millis() - EndOfCycle);
           
           
@@ -386,14 +440,26 @@ void loop()
 
 void connect_mqtt()
 {
-  // connect to tagoIO broker with token auth and set the LWT message
-  Serial.print("connecting...");
-  while (!client.connect("espcurrent", "Token", TAGO_TOKEN, "acl712/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
+  // connect to brokers with auth and set the LWT message
+  #ifdef TAGO
+  Serial.print("connecting to tago...");
+  
+  while (!tago_client.connect("meter2", "Token", TAGO_TOKEN, "meter2/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
     ;
   {
     Serial.print(".");
     delay(1000);
   }
+  #endif
+  #ifdef LOCAL
+  Serial.print("connecting to local broker...");
+  while (!local_client.connect("meter2", "meter2", MQTT_PASSWORD, "meter2/state", 1, 1, "[{\"variable\":\"state\",\"value\":\"offline\"}]"))
+    ;
+  {
+    Serial.print(".");
+    delay(1000);
+  }
+  #endif
 }
 
 void setup_wifi()
