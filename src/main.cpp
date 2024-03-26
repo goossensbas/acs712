@@ -10,16 +10,16 @@
 #include <LiquidCrystal_I2C.h>
 #include "secrets.h"
 
-#define TAGO
-//#define LOCAL
+//#define TAGO
+#define LOCAL
 #define BROKER_URL "mqtt.tago.io"
 #define LOCAL_BROKER_URL "192.168.0.202"
 #define LOCAL_BROKER_PORT 1884
 #define PUB_TOPIC "meter2"
 #define STATE_TOPIC "meter2/state"
 
-#define END_OF_CYCLE 60000
-#define CYCLE_TRESHOLD 0.25
+#define END_OF_CYCLE 90000
+#define CYCLE_TRESHOLD 0.2
 
 
 
@@ -43,7 +43,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 10;
-float intercept = 0.12;
+float intercept = 0.11;
 
 
 
@@ -387,6 +387,9 @@ void loop()
         EndOfCycle = millis();
       }
       if (device_state == 3){
+        if (AmpsRMS >= CYCLE_TRESHOLD){
+          device_state = 2;
+        }
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
           device_state = 0;
