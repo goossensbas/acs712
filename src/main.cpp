@@ -10,16 +10,16 @@
 #include <LiquidCrystal_I2C.h>
 #include "secrets.h"
 
-//#define TAGO
-#define LOCAL
+#define TAGO
+//#define LOCAL
 #define BROKER_URL "mqtt.tago.io"
 #define LOCAL_BROKER_URL "192.168.0.202"
 #define LOCAL_BROKER_PORT 1884
-#define MQTT_KEEPALIVE 60
 #define PUB_TOPIC "meter2"
 #define STATE_TOPIC "meter2/state"
 
-#define END_OF_CYCLE 20000
+#define END_OF_CYCLE 60000
+#define CYCLE_TRESHOLD 0.25
 
 
 
@@ -62,7 +62,7 @@ const char *password = STAPSK;
 WiFiClient espClient;
 
 // callback function for mqtt. Obligatory for PubSubclient.
-void callback1(char *topic, byte *payload, unsigned int length)
+void callback(char *topic, byte *payload, unsigned int length)
 {
   // do something with the message
 
@@ -83,7 +83,7 @@ void callback2(char *topic, byte *payload, unsigned int length)
                  "] payload [" + recv_payload + "]");
 }
 #ifdef TAGO
-PubSubClient tago_client(BROKER_URL, 1883, callback1, espClient);
+PubSubClient tago_client(BROKER_URL, 1883, callback, espClient);
 #endif
 #ifdef LOCAL
 PubSubClient local_client(LOCAL_BROKER_URL, LOCAL_BROKER_PORT, callback2, espClient);
@@ -287,7 +287,7 @@ void loop()
       Serial.print(device_state);
       // IF the device is OFF and the current is more than 0,5A
       // THEN update the device state to ON, and publish the state on the broker
-      if (AmpsRMS >= 0.5 && device_state == 0)
+      if (AmpsRMS >= CYCLE_TRESHOLD && device_state == 0)
       {
         device_state = 1;
         StaticJsonDocument<200> JSONbuffer;
@@ -381,7 +381,7 @@ void loop()
       // IF the device is ON and the current is less than 0,5A for END_OF_CYCLE ms
       // THEN update the device state to OFF, and publish the state on the broker
       
-      if (AmpsRMS < 0.5 && device_state == 2)
+      if (AmpsRMS < CYCLE_TRESHOLD && device_state == 2)
       {
         device_state = 3;
         EndOfCycle = millis();
