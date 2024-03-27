@@ -18,7 +18,7 @@
 #define PUB_TOPIC "meter2"
 #define STATE_TOPIC "meter2/state"
 
-#define END_OF_CYCLE 90000
+#define END_OF_CYCLE 180000 // 3 minutes treshold
 #define CYCLE_TRESHOLD 0.2
 
 
@@ -42,7 +42,7 @@ ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
-float slope = 10;
+float slope = 11;
 float intercept = 0.11;
 
 
