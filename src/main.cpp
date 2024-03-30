@@ -215,8 +215,8 @@ void setup()
   lcd.setCursor(0, 1);
   lcd.print("connecting to wifi");
   Serial.println("Setup WiFi and MQTT");
-  setup_wifi();
-  connect_mqtt();
+  //setup_wifi();
+  //connect_mqtt();
 
   // reset ADC values for measuring current
   ADS.reset();
@@ -239,6 +239,16 @@ void loop()
   while (true)
   {
     iotWebConf.doLoop();
+    #ifdef TAGO
+    if(!(tago_client.connected())){
+      connect_mqtt();
+    }
+    #endif
+    #ifdef LOCAL
+    if(!(local_client.connected())){
+      connect_mqtt();
+    }
+    #endif
     if (state == 0)
     {
       state = 1;
@@ -318,16 +328,18 @@ void loop()
         #ifdef TAGO
         if (tago_client.publish(STATE_TOPIC, JSONmessageBuffer) == true)
         {
-          Serial.println("The cycle has started");
-          lcd.setCursor(0,1);
-          lcd.print("cycle started");
+          Serial.println("published to tago");
         }
         #endif
         #ifdef LOCAL
         if (local_client.publish(STATE_TOPIC, JSONmessageBuffer) == true){
           Serial.println("published to local client");
+
         }
         #endif
+        Serial.println("The cycle has started");
+        lcd.setCursor(0,1);
+        lcd.print("cycle started");
       }
 
       // IF the device state has changed from OFF to ON, increment session ID and write it to file, update start time
@@ -344,16 +356,6 @@ void loop()
       // send the value in mA as INT.
       if (device_state == 2 || device_state == 3)
       {
-        #ifdef TAGO
-        if(!(tago_client.connected())){
-          connect_mqtt();
-        }
-        #endif
-        #ifdef LOCAL
-        if(!(local_client.connected())){
-          connect_mqtt();
-        }
-        #endif
         StaticJsonDocument<200> JSONbuffer;               // make a json object
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
