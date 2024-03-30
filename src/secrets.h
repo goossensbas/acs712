@@ -9,3 +9,8 @@
 #define WASMACHINE_ID 2
 #define SENSOR_ID 2
 #define SESSION_ID 2000
+
+const char thingName[] = "meter2";
+const char wifiInitialApPassword[] = "Ucll2024";
+
+

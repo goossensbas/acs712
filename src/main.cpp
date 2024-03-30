@@ -9,6 +9,7 @@
 #include <ADS1X15.h>
 #include <LiquidCrystal_I2C.h>
 #include "secrets.h"
+#include <IotWebConf.h>
 
 //#define TAGO
 #define LOCAL
@@ -21,8 +22,11 @@
 #define END_OF_CYCLE 180000 // 3 minutes treshold
 #define CYCLE_TRESHOLD 0.2
 
-
-
+//provisioning data
+DNSServer dnsServer;
+WebServer server(80);
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+void handleRoot();
 
 // uncoomment or make a secret.h file with the following content:
 // #ifndef STASSID
@@ -221,12 +225,20 @@ void setup()
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger ADC
   startTime = millis();
+
+  // Initializing the AP.
+  iotWebConf.init();
+  // Set up required URL handlers on the web server.
+  server.on("/", handleRoot);
+  server.on("/config", []{ iotWebConf.handleConfig(); });
+  server.onNotFound([](){ iotWebConf.handleNotFound(); });
 }
 
 void loop()
 {
   while (true)
   {
+    iotWebConf.doLoop();
     if (state == 0)
     {
       state = 1;
@@ -524,27 +536,7 @@ float measure_vdd(void)
   return ADC;
 }
 
-// function to read the counter from the filesystem
-uint32_t readNumberFile(fs::FS &fs, const char *path)
-{
-  Serial.printf("Reading file: %s\r\n", path);
-  File file = fs.open(path, FILE_READ);
-  if (!file || file.isDirectory())
-  {
-    Serial.println("- failed to open file for reading");
-    return 0;
-  }
-  StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, file);
-  // Close the file
-  file.close();
-  // Read the file into a uint32_t variable
-  uint32_t fileContent;
-  fileContent = doc["session_id"];
-
-  return fileContent;
-}
-
+//function to read time from filesystem
 HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
 {
   Serial.printf("Reading file: %s\r\n", counterfile);
@@ -568,6 +560,8 @@ HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
   return data;
 }
 
+
+//function to write time to filesystem
 void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperationData &data)
 {
   File file = SPIFFS.open(counterfile, FILE_WRITE);
@@ -589,6 +583,28 @@ void writeTimeToFile(fs::FS &fs, const char *counterfile, const HoursOfOperation
   file.close();
 }
 
+// function to read the counter from the filesystem
+uint32_t readNumberFile(fs::FS &fs, const char *path)
+{
+  Serial.printf("Reading file: %s\r\n", path);
+  File file = fs.open(path, FILE_READ);
+  if (!file || file.isDirectory())
+  {
+    Serial.println("- failed to open file for reading");
+    return 0;
+  }
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, file);
+  // Close the file
+  file.close();
+  // Read the file into a uint32_t variable
+  uint32_t fileContent;
+  fileContent = doc["session_id"];
+
+  return fileContent;
+}
+
+//function to write session_id to filesystem
 void writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
   File file = SPIFFS.open(counterfile, FILE_WRITE);
   if (!file)
@@ -605,4 +621,22 @@ void writeNumberToFile(fs::FS &fs, const char *counterfile, int session_id){
     return;
   }
   return;
+}
+
+
+// Handle web requests to "/" path
+void handleRoot()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String s = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  s += "<title>IotWebConf 01 Minimal</title></head><body>";
+  s += "Go to <a href='config'>configure page</a> to change settings.";
+  s += "</body></html>\n";
+
+  server.send(200, "text/html", s);
 }
