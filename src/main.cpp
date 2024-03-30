@@ -38,14 +38,30 @@
 // #define SENSOR_ID 9999
 // #define SESSION_ID 9999
 
+// OPTIONAL OTA settings
+// Port defaults to 3232
+// ArduinoOTA.setPort(3232);
+
+// Hostname defaults to esp3232-[MAC]
+// ArduinoOTA.setHostname("myesp32");
+
+// No authentication by default
+// ArduinoOTA.setPassword("admin");
+
+// Password can be set with it's md5 value as well
+// MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
+// ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+
+
 ADS1115 ADS(0x48);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 11;
-float intercept = 0.11;
+float intercept = 0.07;
 
-
+//constructor for measuring VDD
+float measure_vdd(void);
 
 unsigned long startTime = 0; // Variable to store the start time
 unsigned long elapsedTime;
@@ -194,14 +210,8 @@ void setup()
   lcd.clear();
   lcd.print("calibrating...");
 
-  // Measure Vdd. take the average of 1000 samples.
-  for (int i = 0; i < 1000; i++)
-  {
-    // wait for conversion to finish. (conversion takes 1160µs)
-    delay(2);
-    ADC_vdd = ADC_vdd + ADS.readADC(1);
-  }
-  ADC_vdd = ADC_vdd / 1000;
+  // Measure Vdd.
+  ADC_vdd = measure_vdd();
 
   lcd.clear();
   lcd.print("Vdd = ");
@@ -221,14 +231,69 @@ void setup()
   ADS.setMode(0);     // continuous mode
   ADS.readADC(0);     // first read to trigger ADC
   startTime = millis();
+
+    ArduinoOTA
+    .onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+        type = "sketch";
+      else // U_SPIFFS
+        type = "filesystem";
+
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type);
+    })
+    .onEnd([]() {
+      Serial.println("\nEnd");
+    })
+    .onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    })
+    .onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+  ArduinoOTA.begin();
+
+  Serial.println("Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+  lcd.setCursor(0,1);
+  lcd.print(WiFi.localIP());
 }
 
 void loop()
 {
   while (true)
   {
+    ArduinoOTA.handle();
     if (state == 0)
     {
+      //reconnect if connection is lost
+      if (!WiFi.isConnected()){
+        WiFi.reconnect();
+      }
+      #ifdef TAGO
+      if (!tago_client.connected()){
+        connect_mqtt();
+      }
+      #endif
+      #ifdef LOCAL
+      if (!local_client.connected()){
+        connect_mqtt();
+      }
+      #endif 
+      ADC_vdd =  measure_vdd();
+      ADS.reset();
+      ADS.setGain(0);     // 6.144 volt
+      ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
+      ADS.setMode(0);     // continuous mode
+      ADS.readADC(0);     // first read to trigger ADC
       state = 1;
     }
     // state 1: reset sum and sample to 0 and go to state 2
@@ -495,7 +560,7 @@ void setup_wifi()
     lcd.print("connection failed!");
     lcd.setCursor(0, 1);
     lcd.print("Rebooting...");
-    delay(5000);
+    delay(3000);
     ESP.restart();
   }
   while (mdns_init() != ESP_OK)
@@ -513,14 +578,19 @@ void setup_wifi()
 float measure_vdd(void)
 {
   float ADC = 0;
+  ADS.reset();
+  ADS.setGain(0);     // 6.144 volt
+  ADS.setDataRate(7); // 0 = slow   4 = medium   7 = fast
+  ADS.setMode(0);     // continuous mode
+  ADS.readADC(1);     // first read to trigger ADC
   // Measure Vdd. take the average of 1000 samples.
-  for (int i = 0; i < 1000; i++)
+  for (int i = 0; i < 100; i++)
   {
     // wait for conversion to finish. (conversion takes 1160µs)
     delay(2);
     ADC = ADC + ADS.readADC(1);
   }
-  ADC = ADC / 1000;
+  ADC = ADC / 100;
   return ADC;
 }
 
