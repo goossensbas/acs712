@@ -13,8 +13,8 @@
 //#define TAGO
 #define LOCAL
 #define BROKER_URL "mqtt.tago.io"
-#define LOCAL_BROKER_URL "192.168.0.202"
-#define LOCAL_BROKER_PORT 1884
+#define LOCAL_BROKER_URL "werkveldproject2324.iot.uclllabs.be"
+#define LOCAL_BROKER_PORT 1883
 #define PUB_TOPIC "meter2"
 #define STATE_TOPIC "meter2/state"
 
@@ -584,13 +584,13 @@ float measure_vdd(void)
   ADS.setMode(0);     // continuous mode
   ADS.readADC(1);     // first read to trigger ADC
   // Measure Vdd. take the average of 1000 samples.
-  for (int i = 0; i < 100; i++)
+  for (int i = 0; i < 10; i++)
   {
     // wait for conversion to finish. (conversion takes 1160µs)
     delay(2);
     ADC = ADC + ADS.readADC(1);
   }
-  ADC = ADC / 100;
+  ADC = ADC / 10;
   return ADC;
 }
 
