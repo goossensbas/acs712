@@ -58,13 +58,14 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 11;
-float intercept = 0.07;
-
+//float intercept = 0.07;
+float intercept = -2;
 //constructor for measuring VDD
 float measure_vdd(void);
 
 unsigned long startTime = 0; // Variable to store the start time
 unsigned long elapsedTime;
+unsigned long elapsed_sec;
 unsigned long printPeriod = 1000; // in milliseconds
 
 // Track time in milliseconds since last reading
@@ -271,7 +272,9 @@ void loop()
 {
   while (true)
   {
+    //every cycle: check for OTA update requests
     ArduinoOTA.handle();
+    // state 0: calibrate Vdd and check if wifi/mqtt is connected
     if (state == 0)
     {
       //reconnect if connection is lost
@@ -364,8 +367,8 @@ void loop()
         JsonObject meta = state.createNestedObject("metadata");
         meta["wasmachine_id"] = WASMACHINE_ID;
         meta["sensor_id"] = WASMACHINE_ID;
-        meta["this_cycle_time"] = (elapsedTime / 1000);
-        meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
+        meta["this_cycle_time"] = elapsed_sec;
+        meta["total_time_operated"] = TimeData.hoursOfOperation;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         #ifdef TAGO
@@ -391,12 +394,17 @@ void loop()
         device_state = 2;
         startTime = millis();
         elapsedTime = 0;
+        elapsed_sec = 0;
       }
 
       // Only send sensor data if the machine is ON
       // send the value in mA as INT.
       if (device_state == 2 || device_state == 3)
       {
+        //reconnect if connection is lost
+        if (!WiFi.isConnected()){
+          WiFi.reconnect();
+        } 
         #ifdef TAGO
         if(!(tago_client.connected())){
           connect_mqtt();
@@ -417,8 +425,8 @@ void loop()
         JsonObject metadata = amperage.createNestedObject("metadata");
         metadata["sensor_id"] = SENSOR_ID;
         metadata["wasmachine_id"] = WASMACHINE_ID;
-        metadata["this_cycle_time"] = (elapsedTime / 1000);
-        metadata["total_time_operated"] = TimeData.hoursOfOperation / 1000;
+        metadata["this_cycle_time"] = elapsed_sec;
+        metadata["total_time_operated"] = TimeData.hoursOfOperation;
         char JSONmessageBuffer[200];
         serializeJson(JSONbuffer, JSONmessageBuffer);
         // publish the serialised buffer to the broker
@@ -467,8 +475,8 @@ void loop()
           JsonObject meta = state.createNestedObject("metadata");
           meta["wasmachine_id"] = WASMACHINE_ID;
           meta["sensor_id"] = WASMACHINE_ID;
-          meta["this_cycle_time"] = (elapsedTime / 1000);
-          meta["total_time_operated"] = TimeData.hoursOfOperation / 1000;
+          meta["this_cycle_time"] = elapsed_sec;
+          meta["total_time_operated"] = TimeData.hoursOfOperation;
           char JSONmessageBuffer[100];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           #ifdef TAGO
@@ -493,7 +501,7 @@ void loop()
           
           Serial.println("Statistics:");
           Serial.println("total seconds on:");
-          Serial.println(TimeData.hoursOfOperation / 1000);
+          Serial.println(TimeData.hoursOfOperation);
           Serial.println("last cycle in seconds:");
           Serial.println(TimeData.lastUpdate);
         }     
@@ -505,8 +513,9 @@ void loop()
     {
       // Calculate the elapsed time since the start time
       elapsedTime = millis() - startTime;
-      TimeData.hoursOfOperation += (elapsedTime - TimeData.lastUpdate);
-      TimeData.lastUpdate = elapsedTime;
+      TimeData.hoursOfOperation += ((elapsedTime/1000) - TimeData.lastUpdate);
+      elapsed_sec = (elapsedTime/1000);
+      TimeData.lastUpdate = (elapsedTime/1000);
       writeTimeToFile(SPIFFS, counterfilename, TimeData);
     }
   }
@@ -617,7 +626,7 @@ uint32_t readNumberFile(fs::FS &fs, const char *path)
 
 HoursOfOperationData readTimeFromFile(fs::FS &fs, const char *counterfile)
 {
-  Serial.printf("Reading file: %s\r\n", counterfile);
+  //Serial.print("Reading file: %s\r\n", counterfile);
   File file = fs.open(counterfile, FILE_READ);
   if (!file)
   {
