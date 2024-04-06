@@ -58,8 +58,10 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // change to 0x3F for meter 1!!
 // slope = 1/accuracy in volt. For the 20A model the accuracy is 100mV/A
 float slope = 11;
-//float intercept = 0.07;
-float intercept = -2;
+float intercept = 0.07;
+
+//use for testing:
+//float intercept = -2;
 //constructor for measuring VDD
 float measure_vdd(void);
 
