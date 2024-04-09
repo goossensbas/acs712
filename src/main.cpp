@@ -401,6 +401,8 @@ void loop()
           Serial.println("published to local client");
         }
         #endif
+
+        
       }
 
       // IF the device state has changed from OFF to ON, increment session ID and write it to file, update start time
@@ -412,6 +414,8 @@ void loop()
         startTime = millis();
         elapsedTime = 0;
         elapsed_sec = 0;
+        //read the value of Timedata from FS.
+        TimeData = readTimeFromFile(SPIFFS, counterfilename)
       }
 
       // Only send sensor data if the machine is ON
