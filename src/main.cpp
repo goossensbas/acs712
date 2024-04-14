@@ -18,7 +18,7 @@
 #define PUB_TOPIC "meter2"
 #define STATE_TOPIC "meter2/state"
 
-#define END_OF_CYCLE 180000 // 3 minutes treshold
+#define END_OF_CYCLE 360000 // 3 minutes treshold
 #define CYCLE_TRESHOLD 0.2
 
 
@@ -60,7 +60,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 float slope = 11;
 float intercept = 0.07;
 
-//use for testing:
+//uncomment to test:
 //float intercept = -2;
 //constructor for measuring VDD
 float measure_vdd(void);
@@ -135,8 +135,9 @@ const char *sessionfilename = "/session_id.txt";
 
 HoursOfOperationData TimeData;
 
-void connect_mqtt();
 void setup_wifi();
+void connect_mqtt();
+
 
 void setup()
 {
@@ -279,7 +280,7 @@ void loop()
     // state 0: calibrate Vdd and check if wifi/mqtt is connected
     if (state == 0)
     {
-      //reconnect if connection is lost
+      
       if (!WiFi.isConnected()){
         WiFi.reconnect();
       }
@@ -353,6 +354,21 @@ void loop()
     // state 3: send the values to MQTT broker
     if (state == 3)
     {
+      //reconnect if connection is lost
+      if (!WiFi.isConnected()){
+        WiFi.reconnect();
+      }
+      #ifdef TAGO
+        if (!tago_client.connected()){
+          connect_mqtt();
+        }
+        #endif
+        #ifdef LOCAL
+        if (!local_client.connected()){
+          connect_mqtt();
+        }
+        #endif 
+      
 
       Serial.print(device_state);
       // IF the device is OFF and the current is more than 0,5A
@@ -386,6 +402,8 @@ void loop()
           Serial.println("published to local client");
         }
         #endif
+
+        
       }
 
       // IF the device state has changed from OFF to ON, increment session ID and write it to file, update start time
@@ -397,26 +415,14 @@ void loop()
         startTime = millis();
         elapsedTime = 0;
         elapsed_sec = 0;
+        //read the value of Timedata from FS.
+        TimeData = readTimeFromFile(SPIFFS, counterfilename);
       }
 
       // Only send sensor data if the machine is ON
       // send the value in mA as INT.
       if (device_state == 2 || device_state == 3)
       {
-        //reconnect if connection is lost
-        if (!WiFi.isConnected()){
-          WiFi.reconnect();
-        } 
-        #ifdef TAGO
-        if(!(tago_client.connected())){
-          connect_mqtt();
-        }
-        #endif
-        #ifdef LOCAL
-        if(!(local_client.connected())){
-          connect_mqtt();
-        }
-        #endif
         StaticJsonDocument<200> JSONbuffer;               // make a json object
         JsonArray array = JSONbuffer.to<JsonArray>();     // create an array
         JsonObject amperage = array.createNestedObject(); // create a nested object in the array
@@ -468,7 +474,7 @@ void loop()
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
           device_state = 0;
-          StaticJsonDocument<100> JSONbuffer;
+          StaticJsonDocument<200> JSONbuffer;
           JsonArray array = JSONbuffer.to<JsonArray>();
           JsonObject state = array.createNestedObject();
           state["variable"] = "state";
@@ -479,7 +485,7 @@ void loop()
           meta["sensor_id"] = WASMACHINE_ID;
           meta["this_cycle_time"] = elapsed_sec;
           meta["total_time_operated"] = TimeData.hoursOfOperation;
-          char JSONmessageBuffer[100];
+          char JSONmessageBuffer[200];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           #ifdef TAGO
           if (tago_client.publish(STATE_TOPIC, JSONmessageBuffer) == true)
