@@ -135,8 +135,9 @@ const char *sessionfilename = "/session_id.txt";
 
 HoursOfOperationData TimeData;
 
-void connect_mqtt();
 void setup_wifi();
+void connect_mqtt();
+
 
 void setup()
 {
@@ -415,7 +416,7 @@ void loop()
         elapsedTime = 0;
         elapsed_sec = 0;
         //read the value of Timedata from FS.
-        TimeData = readTimeFromFile(SPIFFS, counterfilename)
+        TimeData = readTimeFromFile(SPIFFS, counterfilename);
       }
 
       // Only send sensor data if the machine is ON
@@ -473,7 +474,7 @@ void loop()
         if ((millis() - EndOfCycle) >= END_OF_CYCLE)
         {
           device_state = 0;
-          StaticJsonDocument<100> JSONbuffer;
+          StaticJsonDocument<200> JSONbuffer;
           JsonArray array = JSONbuffer.to<JsonArray>();
           JsonObject state = array.createNestedObject();
           state["variable"] = "state";
@@ -484,7 +485,7 @@ void loop()
           meta["sensor_id"] = WASMACHINE_ID;
           meta["this_cycle_time"] = elapsed_sec;
           meta["total_time_operated"] = TimeData.hoursOfOperation;
-          char JSONmessageBuffer[100];
+          char JSONmessageBuffer[200];
           serializeJson(JSONbuffer, JSONmessageBuffer);
           #ifdef TAGO
           if (tago_client.publish(STATE_TOPIC, JSONmessageBuffer) == true)
